@@ -2,7 +2,7 @@
 import subprocess, json, math
 
 DUR = json.load(open("src/timeline.json"))
-TOTAL = DUR[-1]["start"] + DUR[-1]["dur"] + 3.0
+TOTAL = DUR[-1]["start"] + DUR[-1]["dur"] + 3.4
 
 # 三个频段的正弦叠加 + 缓慢 LFO，模拟深空氛围垫
 src = []

@@ -14,8 +14,8 @@
 | 项 | 值 |
 |---|---|
 | 分辨率 | 1280×720（横屏 16:9） |
-| 帧率 | 30 fps（9099 帧） |
-| 时长 | 298.81 秒（4:58.8） |
+| 帧率 | 30 fps（9066 帧） |
+| 时长 | 302.21 秒（5:02.2，含 3.4 秒片尾卡） |
 | 音轨 | AAC 立体声 44.1kHz：中文解说（edge-tts `zh-CN-YunxiNeural`，语速 −4%）＋ 合成深空氛围垫（−26 dB 量级，压在解说之下） |
 | 字幕 | 分段字幕，每段对应一个分镜，单条 ≤ 26 字 |
 
@@ -26,7 +26,7 @@
 **实现**（`src/`）：
 
 - `engine.py` —— 纯 PIL 渲染引擎，暴露确定性接口 `render_at(t)`（t 秒 → 1280×720 帧），全部图形由 `smoothstep / ease-out` 驱动，无随机时钟；星野与粒子用固定 seed 的伪随机数，保证同 t 必得同帧。
-- `render.py` —— 6 进程并行逐帧输出 `frames/f%06d.jpg`（9099 帧，约 90 秒渲完）。
+- `render.py` —— 6 进程并行逐帧输出 `frames/f%06d.jpg`（9066 帧，约 90 秒渲完）。
 - `gen_segs.py` / `tts.py` / `mksubs.py` —— 解说词 → edge-tts 分段合成 → `ffprobe` 取实际时长 → 生成 `timeline.json`（每段起点/时长）与 `subs.json`、`video/episode.srt`。
 - `bgm.py` —— 用 `aevalsrc` 合成 6 个分音的低频 drone + 长延时回声，作为氛围床，混音时压到解说之下 20 dB 以上。
 - `cover.py` —— 取 20 秒处画面虚化后叠字生成封面。
@@ -67,11 +67,11 @@ python3.11 src/gen_segs.py        # 生成解说词分段
 python3.11 src/tts.py             # 合成 + 拼接 + 生成 timeline.json
 python3.11 src/mksubs.py          # 生成 subs.json 与 video/episode.srt
 python3.11 src/bgm.py             # 合成配乐
-python3.11 src/render.py frames   # 逐帧渲染（约 9099 帧）
+python3.11 src/render.py frames   # 逐帧渲染（约 9066 帧）
 python3.11 src/cover.py
 ffmpeg -framerate 30 -i frames/f%06d.jpg -i audio/voice.m4a -i audio/bgm.m4a \
-  -filter_complex "[1:a]volume=1.6[v];[2:a]volume=0.010[b];[v][b]amix=inputs=2:duration=first,alimiter=limit=0.95[a]" \
-  -map 0:v -map "[a]" -c:v libopenh264 -b:v 2400k -pix_fmt yuv420p -r 30 -c:a aac -b:a 160k -shortest video/episode.mp4
+  -filter_complex "[1:a]volume=1.6,apad[v];[2:a]volume=0.010,apad[b];[v][b]amix=inputs=2:duration=longest,alimiter=limit=0.95[a]" \
+  -map 0:v -map "[a]" -c:v libopenh264 -b:v 2400k -pix_fmt yuv420p -r 30 -c:a aac -b:a 160k -t 302.21 video/episode.mp4
 ```
 
 > 若你的 ffmpeg 带 libx264，把 `-c:v libopenh264 -b:v 2400k` 换成 `-c:v libx264 -crf 21 -preset medium` 即可，画质略优、体积更小。
@@ -96,3 +96,15 @@ audio/bgm.m4a        配乐
 video/episode.mp4    成片
 video/episode.srt    字幕
 ```
+
+## 返修记录（2026-11-06）
+
+初版成片 4:58.8，但**片尾卡整段没有进画面**。根因有两处，都已修：
+
+1. `engine.py` 里 `TOTAL` 写死为 `303.3`，而 `timeline.json` 实际只到 `298.81`；
+2. 合成命令用了 `-shortest`，音频一结束就切视频，最后 4.5 秒被丢掉。
+
+现在 `TOTAL = 最后一段解说结束 + TAIL(3.4s)`，由时间轴推导；合成改用 `apad` 把音轨补到画面长度，不再用 `-shortest`。
+同时修了 `render_at()` 里 `PLAN[idx]` 取不到 `"end"` 的问题——`PLAN` 只有 41 项，索引最大 40，片尾卡函数 `sc_end` 从来没被调用过，所以即使补时长也只会停在最后一句问话上。
+
+成片：302.21 秒（5:02.2），末帧为「四十倍 / 不是打破物理，是我们把吸积盘想得太干净了 / 更会卸力，而不是更用力」。

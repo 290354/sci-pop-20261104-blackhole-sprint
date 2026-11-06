@@ -81,7 +81,10 @@ def fit(d, s, kind_b, kind, maxw, maxsize, minsize=14):
 # ---------------- 时间轴 ----------------
 TL = json.load(open(os.path.join(os.path.dirname(__file__), "timeline.json")))
 SUBS = json.load(open(os.path.join(os.path.dirname(__file__), "subs.json")))
-TOTAL = float(os.environ.get("EP_TOTAL", "303.3"))
+# 总时长由时间轴推导：最后一段解说结束 + 片尾卡停留 TAIL 秒。
+# 之前写死 303.3，而 timeline 实际只到 298.81，合成时 -shortest 把片尾卡整段截掉了。
+TAIL = float(os.environ.get("EP_TAIL", "3.4"))
+TOTAL = float(os.environ.get("EP_TOTAL", str(TL[-1]["start"] + TL[-1]["dur"] + TAIL)))
 
 CHAP = [
     (0.0, "冷开场"),
@@ -852,6 +855,8 @@ def render_subs(img, d):
 
 T_current = [0.0]
 
+TAIL0 = TL[-1]["start"] + TL[-1]["dur"]   # 解说结束、片尾卡开始
+
 def render_at(t):
     T_current[0] = t
     idx = 0
@@ -859,9 +864,15 @@ def render_at(t):
         if t >= s["start"]:
             idx = i
     s = TL[idx]
-    u = clamp((t - s["start"]) / max(s["dur"] + s["hold"], 1e-6))
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img, "RGBA")
+    if t >= TAIL0:
+        # 解说结束后进入片尾卡。之前这里永远取 PLAN[40]，sc_end 根本没被调用过。
+        u = clamp((t - TAIL0) / max(TOTAL - TAIL0, 0.1))
+        SCENES["end"](img, d, t, u)
+        render_subs(img, d)
+        return img
+    u = clamp((t - s["start"]) / max(s["dur"] + s["hold"], 1e-6))
     key = PLAN[idx] if idx < len(PLAN) else "end"
     SCENES[key](img, d, t, u)
     chap = chapter_at(s["start"])
